@@ -4,4 +4,10 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "mlx>=0.30.6",
+    "numpy>=2.4.2",
+    "pymupdf>=1.27.1",
+    "sentencepiece>=0.2.1",
+    "tqdm>=4.67.3",
+]

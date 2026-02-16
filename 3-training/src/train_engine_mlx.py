@@ -142,7 +142,7 @@ def get_governor_state(current_batch_size):
     Returns (target_batch_size, sleep_time, mode_name) based on AEDT time and Memory.
     """
     # 1. Memory Safety Override
-    active_mem = mx.metal.get_active_memory()
+    active_mem = mx.get_active_memory()
     if active_mem > MEMORY_LIMIT_BYTES:
         print(f"[SAFETY] Memory {active_mem/1024**3:.2f}GB > Limit. Dropping Batch Size.")
         new_bs = max(1, current_batch_size // 2)
@@ -206,12 +206,12 @@ def main():
         losses = nn.losses.cross_entropy(logits, y)
         return mx.mean(losses)
     
-    state = [model.state, optimizer.state, mx.random.state]
+
+    loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
     
-    @mx.compile
+    # @mx.compile # Disabled: mx.eval() fails to sync compiled state correctly here
     def train_step(x, y):
-        loss_and_grads = mx.value_and_grad(model, loss_fn)
-        loss, grads = loss_and_grads(model, x, y)
+        loss, grads = loss_and_grad_fn(model, x, y)
         optimizer.update(model, grads)
         return loss
 
@@ -242,7 +242,7 @@ def main():
             
             # 3. Step
             loss = train_step(x, y)
-            mx.eval(state) # Sync
+            mx.eval(model.parameters(), optimizer.state) # Sync
             
             # 4. Metrics & Logging
             dt = time.time() - iter_start
@@ -250,7 +250,7 @@ def main():
             tokens_processed += batch_size * CONTEXT_LENGTH
             
             if step % 20 == 0:
-                mem_gb = mx.metal.get_active_memory() / 1024**3
+                mem_gb = mx.get_active_memory() / 1024**3
                 tps = (batch_size * CONTEXT_LENGTH) / dt
                 print(f"[Step {step}] {mode} | BS:{batch_size} | Loss:{loss.item():.3f} | Mem:{mem_gb:.1f}GB | {tps:.0f} tok/s")
                 log_metrics(step, epoch, loss.item(), "N/A", mode, mem_gb, batch_size, tps)
