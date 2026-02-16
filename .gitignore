@@ -1,0 +1,32 @@
+# System & Environment
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+sage-gpt/
+env/
+venv/
+.sage_status
+.python-version
+
+# Data (CONFIDENTIAL)
+1-data/
+*.pdf
+*.txt
+*.bin
+
+# Model Artifacts (LARGE)
+2-tokenizer/*.model
+2-tokenizer/*.vocab
+3-model/
+*.safetensors
+*.npz
+
+# Logs & Output
+4-output/logs/
+*.csv
+*.log
+
+# Editor
+.vscode/
+.idea/
