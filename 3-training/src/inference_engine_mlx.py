@@ -6,9 +6,9 @@ from pathlib import Path
 
 # --- Configuration (STRICT ALIGNMENT WITH YOUR train_engine_mlx.py) ---
 VOCAB_SIZE = 12000
-N_LAYER = 8
-N_HEAD = 8
-N_EMBD = 512
+N_LAYER = 6
+N_HEAD = 6
+N_EMBD = 384
 CONTEXT_LENGTH = 256
 
 CHECKPOINT_PATH = "3-model/mlx/checkpoints/epoch_15.safetensors"

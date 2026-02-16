@@ -25,22 +25,24 @@ except ImportError:
     sys.exit(1)
 
 # --- Configuration ---
-# Architecture
+# Architecture (Grokking Regime: ~15M params)
 VOCAB_SIZE = 12000
-N_LAYER = 8
-N_HEAD = 8
-N_EMBD = 512
+N_LAYER = 6
+N_HEAD = 6
+N_EMBD = 384
 CONTEXT_LENGTH = 256
 
 # Training
 WEIGHT_DECAY = 0.1
 LEARNING_RATE_MAX = 3e-4
-WARMUP_STEPS = 1000
+LEARNING_RATE_MIN = 3e-5
+WARMUP_STEPS = 2000
+LR_DECAY_STEPS = 100000
 
 # Governor (AEDT UTC+11)
 AEDT_OFFSET = timezone(timedelta(hours=11))
 STEALTH_BATCH_SIZE = 4
-FACTORY_BATCH_SIZE = 32
+FACTORY_BATCH_SIZE = 128
 STEALTH_SLEEP = 0.05
 MEMORY_LIMIT_BYTES = 12 * 1024 * 1024 * 1024  # 12 GB
 LOWER_MEMORY_LIMIT = 10 * 1024 * 1024 * 1024 # 10 GB target for Stealth
@@ -54,16 +56,18 @@ LOG_FILE = config.OUTPUT_DIR / "logs" / "training_history.csv"
 TOKENIZER_MODEL = config.TOKENIZER_DIR / "sutra_tokenizer.model"
 
 # --- Logging Setup ---
+# --- Logging Setup ---
 file_exists = list(LOG_FILE.exists() for _ in [0]) # Hacky check for header
 with open(LOG_FILE, "a", newline="") as f:
     writer = csv.writer(f)
     if not LOG_FILE.exists() or LOG_FILE.stat().st_size == 0:
-        writer.writerow(["Timestamp", "Step", "Epoch", "Loss", "Val_Loss", "Mode", "Memory_GB", "Batch_Size", "Tokens_Per_Sec"])
+        writer.writerow(["Timestamp", "Step", "Epoch", "Train_Loss", "Val_Loss", "Mode", "Memory_GB", "Batch_Size", "Tokens_Per_Sec", "LR"])
 
-def log_metrics(step, epoch, loss, val_loss, mode, mem_gb, batch_size, tps):
+def log_metrics(step, epoch, train_loss, val_loss, mode, mem_gb, batch_size, tps, lr):
     with open(LOG_FILE, "a", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([datetime.now(AEDT_OFFSET).isoformat(), step, epoch, f"{loss:.4f}", val_loss, mode, f"{mem_gb:.2f}", batch_size, f"{tps:.2f}"])
+        val_str = f"{val_loss:.4f}" if isinstance(val_loss, float) else val_loss
+        writer.writerow([datetime.now(AEDT_OFFSET).isoformat(), step, epoch, f"{train_loss:.4f}", val_str, mode, f"{mem_gb:.2f}", batch_size, f"{tps:.2f}", f"{lr:.2e}"])
 
 # --- Model Architecture ---
 
@@ -137,6 +141,18 @@ class TransformerLM(nn.Module):
 
 # --- Helper Logic ---
 
+def get_lr(it):
+    # 1) Linear Warmup
+    if it < WARMUP_STEPS:
+        return LEARNING_RATE_MAX * (it + 1) / WARMUP_STEPS
+    # 2) Constant Min Learning Rate after Decay Info
+    if it > LR_DECAY_STEPS:
+        return LEARNING_RATE_MIN
+    # 3) Cosine Decay
+    decay_ratio = (it - WARMUP_STEPS) / (LR_DECAY_STEPS - WARMUP_STEPS)
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return LEARNING_RATE_MIN + coeff * (LEARNING_RATE_MAX - LEARNING_RATE_MIN)
+
 def get_governor_state(current_batch_size):
     """
     Returns (target_batch_size, sleep_time, mode_name) based on AEDT time and Memory.
@@ -183,12 +199,17 @@ def generate_cooing(model, tokenizer):
 def main():
     print(f"Initializing MLX Engine (AEDT Aware)...")
     
-    # Data Loading (Mmap)
+    # Data Loading (Mmap & Split)
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"Corpus not found: {DATA_PATH}")
     
-    data = np.memmap(DATA_PATH, dtype=np.uint16, mode='r')
-    print(f"Corpus Mapped. Size: {len(data)/1e6:.2f}M tokens.")
+    data_map = np.memmap(DATA_PATH, dtype=np.uint16, mode='r')
+    split_idx = int(len(data_map) * 0.9)
+    train_data = data_map[:split_idx]
+    val_data = data_map[split_idx:]
+    
+    print(f"Corpus Mapped. Total: {len(data_map)/1e6:.2f}M tokens.")
+    print(f"Split: Train={len(train_data)/1e6:.2f}M, Val={len(val_data)/1e6:.2f}M")
     
     # Tokenizer
     sp = spm.SentencePieceProcessor(model_file=str(TOKENIZER_MODEL))
@@ -199,6 +220,7 @@ def main():
     params = sum(v.size for _, v in tree_flatten(model.parameters()))
     print(f"Model Params: {params/1e6:.2f}M")
     
+    # Optimizer (LR updated in loop)
     optimizer = optim.AdamW(learning_rate=LEARNING_RATE_MAX, weight_decay=WEIGHT_DECAY)
     
     def loss_fn(model, x, y):
@@ -206,14 +228,22 @@ def main():
         losses = nn.losses.cross_entropy(logits, y)
         return mx.mean(losses)
     
-
     loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
     
-    # @mx.compile # Disabled: mx.eval() fails to sync compiled state correctly here
-    def train_step(x, y):
-        loss, grads = loss_and_grad_fn(model, x, y)
-        optimizer.update(model, grads)
-        return loss
+    # Val Function
+    def estimate_loss():
+        losses = []
+        # 10 random batches
+        for _ in range(10):
+            ix = np.random.randint(0, len(val_data) - CONTEXT_LENGTH, STEALTH_BATCH_SIZE) # Use small batch for speed
+            x_np = np.stack([val_data[i:i+CONTEXT_LENGTH] for i in ix]).astype(np.int32)
+            y_np = np.stack([val_data[i+1:i+CONTEXT_LENGTH+1] for i in ix]).astype(np.int32)
+            x = mx.array(x_np)
+            y = mx.array(y_np)
+            logits = model(x)
+            l = nn.losses.cross_entropy(logits, y)
+            losses.append(mx.mean(l).item())
+        return sum(losses) / len(losses)
 
     # Loop State
     step = 0
@@ -232,28 +262,40 @@ def main():
             target_bs, sleep_time, mode = get_governor_state(batch_size)
             batch_size = target_bs # Apply target
             
-            # 2. Batch Construction
-            ix = np.random.randint(0, len(data) - CONTEXT_LENGTH, batch_size)
-            x_np = np.stack([data[i:i+CONTEXT_LENGTH] for i in ix]).astype(np.int32)
-            y_np = np.stack([data[i+1:i+CONTEXT_LENGTH+1] for i in ix]).astype(np.int32)
+            # 2. Update LR
+            lr = get_lr(step)
+            optimizer.learning_rate = lr
+
+            # 3. Batch Construction (Train split)
+            ix = np.random.randint(0, len(train_data) - CONTEXT_LENGTH, batch_size)
+            x_np = np.stack([train_data[i:i+CONTEXT_LENGTH] for i in ix]).astype(np.int32)
+            y_np = np.stack([train_data[i+1:i+CONTEXT_LENGTH+1] for i in ix]).astype(np.int32)
             
             x = mx.array(x_np)
             y = mx.array(y_np)
             
-            # 3. Step
-            loss = train_step(x, y)
+            # 4. Step
+            loss, grads = loss_and_grad_fn(model, x, y)
+            optimizer.update(model, grads)
             mx.eval(model.parameters(), optimizer.state) # Sync
             
-            # 4. Metrics & Logging
+            # 5. Metrics & Logging
             dt = time.time() - iter_start
             iter_start = time.time()
             tokens_processed += batch_size * CONTEXT_LENGTH
             
-            if step % 20 == 0:
+            if step % 500 == 0:
+                val_loss = estimate_loss()
                 mem_gb = mx.get_active_memory() / 1024**3
                 tps = (batch_size * CONTEXT_LENGTH) / dt
-                print(f"[Step {step}] {mode} | BS:{batch_size} | Loss:{loss.item():.3f} | Mem:{mem_gb:.1f}GB | {tps:.0f} tok/s")
-                log_metrics(step, epoch, loss.item(), "N/A", mode, mem_gb, batch_size, tps)
+                print(f"[Step {step}] {mode} | BS:{batch_size} | TrLoss:{loss.item():.4f} | ValLoss:{val_loss:.4f} | LR:{lr:.2e} | Mem:{mem_gb:.1f}GB")
+                log_metrics(step, epoch, loss.item(), val_loss, mode, mem_gb, batch_size, tps, lr)
+            elif step % 20 == 0:
+                 # Fast log
+                mem_gb = mx.get_active_memory() / 1024**3
+                tps = (batch_size * CONTEXT_LENGTH) / dt
+                print(f"[Step {step}] {mode} | BS:{batch_size} | Loss:{loss.item():.4f} | LR:{lr:.2e} | {tps:.0f} tok/s")
+
                 
             # 5. Cooing (Every 30 mins)
             if time.time() - last_coo_time > 1800: # 1800s = 30m
@@ -264,7 +306,7 @@ def main():
             # User said: "at the end of every Epoch".
             # Epoch = len(data) / (batch_size * ctx) steps.
             # Variable batch size makes exact epoch hard. Let's approx based on tokens seen.
-            if tokens_processed >= len(data):
+            if tokens_processed >= len(train_data):
                 epoch += 1
                 tokens_processed = 0
                 ckpt_path = CHECKPOINT_DIR / f"epoch_{epoch}.safetensors"
