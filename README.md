@@ -75,13 +75,13 @@ uv pip install -r requirements.txt
 ### 2. Ignite the Engine
 To begin the training loop (auto-resumes from latest checkpoint):
 ```bash
-python3 3-training/src/train_engine_mlx.py
+uv run python 3-training/src/train_engine_mlx.py
 ```
 
 ### 3. Converse with SAGE
 To test the model's generation capabilities:
 ```bash
-python3 3-training/src/inference_engine_mlx.py
+uv run python 3-training/src/inference_engine_mlx.py
 ```
 
 ### 3. Hot Swap mode
@@ -90,7 +90,13 @@ To force hot swap FACTORY mode or STEALTH mode:
 echo "FACTORY" > MODE_OVERRIDE.txt
 #OR
 echo "STEALTH" > MODE_OVERRIDE.txt
-python3 3-training/src/train_engine_mlx.py
+uv run python 3-training/src/train_engine_mlx.py
+```
+
+### 4. Run Ashtavakra Audit
+Run this to check the model's current state:
+```bash
+uv run python 3-training/src/ashtavakra_audit.py
 ```
 ---
 
