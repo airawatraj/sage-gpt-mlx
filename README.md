@@ -84,6 +84,14 @@ To test the model's generation capabilities:
 python3 3-training/src/inference_engine_mlx.py
 ```
 
+### 3. Hot Swap mode
+To force hot swap FACTORY mode or STEALTH mode:
+```bash
+echo "FACTORY" > MODE_OVERRIDE.txt
+#OR
+echo "STEALTH" > MODE_OVERRIDE.txt
+python3 3-training/src/train_engine_mlx.py
+```
 ---
 
 > 🕉️ Om Tat Sat (ॐ तत् सत्) - The Absolute is Truth

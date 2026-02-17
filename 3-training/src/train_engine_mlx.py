@@ -54,6 +54,7 @@ CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = config.OUTPUT_DIR / "logs" / "training_history.csv"
 (config.OUTPUT_DIR / "logs").mkdir(parents=True, exist_ok=True)
 TOKENIZER_MODEL = config.TOKENIZER_DIR / "sutra_tokenizer.model"
+MODE_OVERRIDE_FILE = project_root / "MODE_OVERRIDE.txt"
 
 # --- Logging Setup ---
 # --- Logging Setup ---
@@ -153,16 +154,23 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return LEARNING_RATE_MIN + coeff * (LEARNING_RATE_MAX - LEARNING_RATE_MIN)
 
-def get_governor_state(current_batch_size):
+def get_governor_state(current_batch_size, override_status=None):
     """
     Returns (target_batch_size, sleep_time, mode_name) based on AEDT time and Memory.
+    override_status: If set to "FACTORY" or "STEALTH", forces that mode.
     """
+    # 0. Manual Override
+    if override_status == "FACTORY":
+        return FACTORY_BATCH_SIZE, 0.0, "FACTORY (OVERRIDE)"
+    elif override_status == "STEALTH":
+        return STEALTH_BATCH_SIZE, STEALTH_SLEEP, "STEALTH (OVERRIDE)"
+
     # 1. Memory Safety Override
     active_mem = mx.get_active_memory()
     if active_mem > MEMORY_LIMIT_BYTES:
         print(f"[SAFETY] Memory {active_mem/1024**3:.2f}GB > Limit. Dropping Batch Size.")
         new_bs = max(1, current_batch_size // 2)
-        mx.metal.clear_cache()
+        mx.clear_cache()
         return new_bs, 0.1, "SAFETY_RECOVERY"
 
     # 2. Time-Based Governor
@@ -194,6 +202,60 @@ def generate_cooing(model, tokenizer):
     decoded = tokenizer.decode(tokens)
     print(f"\n[SAGE-COO]: {decoded}\n")
 
+def get_last_step():
+    """Reads the last step from the training log CSV."""
+    if not LOG_FILE.exists():
+        print(f"[RESUME] Log file not found at {LOG_FILE}")
+        return 0
+    try:
+        # Use 'rb' to efficiently seek to end, but for simplicity/robustness with CSV module, read text
+        with open(LOG_FILE, "r") as f:
+            lines = f.readlines()
+            if not lines:
+                print("[RESUME] Log file is empty.")
+                return 0
+            
+            # Get last non-empty line
+            last_line = lines[-1].strip()
+            if not last_line:
+                # Try going back
+                last_line = lines[-2].strip() if len(lines) > 1 else ""
+
+            if not last_line:
+                 print("[RESUME] No valid lines found in log.")
+                 return 0
+            
+            # Parse CSV line manually or with reader on just that line
+            row = next(csv.reader([last_line]))
+            # Header: Timestamp,Step,Epoch,...
+            # Step is index 1
+            step_val = int(row[1])
+            print(f"[RESUME] Found last step in log: {step_val}")
+            return step_val
+
+    except Exception as e:
+        print(f"[WARN] Failed to read last step from log: {e}")
+        return 0
+
+def get_latest_checkpoint():
+    """Finds the latest checkpoint (interrupt_save or highest epoch)."""
+    # 1. Check for interrupt_save (highest priority for immediate resume)
+    interrupt_ckpt = CHECKPOINT_DIR / "interrupt_save.safetensors"
+    if interrupt_ckpt.exists():
+        return interrupt_ckpt
+    
+    # 2. Check for numbered epochs
+    checkpoints = list(CHECKPOINT_DIR.glob("epoch_*.safetensors"))
+    if not checkpoints:
+        return None
+    
+    # Sort by epoch number
+    try:
+        latest = max(checkpoints, key=lambda p: int(p.stem.split("_")[1]))
+        return latest
+    except ValueError:
+        return None
+
 # --- Training Loop ---
 
 def main():
@@ -219,6 +281,26 @@ def main():
     mx.eval(model.parameters())
     params = sum(v.size for _, v in tree_flatten(model.parameters()))
     print(f"Model Params: {params/1e6:.2f}M")
+    
+    # --- Resume Logic ---
+    start_step = 0
+    
+    # 1. Load Weights
+    latest_ckpt = get_latest_checkpoint()
+    if latest_ckpt:
+        try:
+            print(f"Loading weights from {latest_ckpt.name}...")
+            model.load_weights(str(latest_ckpt))
+        except Exception as e:
+            print(f"[WARN] Failed to load weights: {e}")
+    
+    # 2. Restore Step Count (STRICT STEP LOADING)
+    last_step_from_csv = get_last_step()
+    if last_step_from_csv > 0:
+        start_step = last_step_from_csv
+        print(f"Resumed Step Count: {start_step}")
+    else:
+        print("[RESUME] Starting from Step 0 (No history found).")
     
     # Optimizer (LR updated in loop)
     optimizer = optim.AdamW(learning_rate=LEARNING_RATE_MAX, weight_decay=WEIGHT_DECAY)
@@ -246,11 +328,25 @@ def main():
         return sum(losses) / len(losses)
 
     # Loop State
-    step = 0
-    epoch = 0
+    step = start_step # Explicit State Override from CSV
+    print(f"[DEBUG] Loop initialized with Step: {step}")
+    epoch = 0 # TODO: Could approximate epoch from step if needed
     tokens_processed = 0
     last_coo_time = time.time()
-    batch_size = STEALTH_BATCH_SIZE # Start conservative
+    
+    # --- Initial Governor Check ---
+    override_status = None
+    if MODE_OVERRIDE_FILE.exists():
+        try:
+            content = MODE_OVERRIDE_FILE.read_text().strip()
+            if content in ["FACTORY", "STEALTH"]:
+                override_status = content
+        except Exception:
+            pass
+
+    # Set initial batch size based on Governor immediately
+    batch_size, sleep_time, mode = get_governor_state(STEALTH_BATCH_SIZE, override_status)
+    print(f"Resuming from Step {step} in {mode} Mode (BS={batch_size})")
     
     iter_start = time.time()
     
@@ -258,8 +354,34 @@ def main():
     
     try:
         while True:
+            # 0. Check for Override Signal (Every 500 steps, synced with Validation)
+            if step % 500 == 0:
+                new_override = None
+                if MODE_OVERRIDE_FILE.exists():
+                    try:
+                        content = MODE_OVERRIDE_FILE.read_text().strip()
+                        if content in ["FACTORY", "STEALTH"]:
+                            new_override = content
+                    except Exception as e:
+                        print(f"[WARN] Failed to read override file: {e}")
+                
+                # Check for State Change
+                if new_override != override_status:
+                    print(f"\n⚠️ SOVEREIGN OVERRIDE: TRANSITIONING TO [{new_override if new_override else 'AUTO'}] ⚠️")
+                    
+                    # 1. Save Interruption State
+                    msg = f"Transitioning to {new_override}" if new_override else "Returning to Auto Governor"
+                    print(f"[Governor] {msg}. Saving safety checkpoint...")
+                    model.save_weights(str(CHECKPOINT_DIR / "interrupt_save.safetensors"))
+                    
+                    # 2. Clear Cache for Re-allocation
+                    mx.clear_cache()
+                    print("[Governor] Metal Cache Cleared.")
+                    
+                    override_status = new_override
+
             # 1. Governor Check
-            target_bs, sleep_time, mode = get_governor_state(batch_size)
+            target_bs, sleep_time, mode = get_governor_state(batch_size, override_status)
             batch_size = target_bs # Apply target
             
             # 2. Update LR
