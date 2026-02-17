@@ -149,9 +149,10 @@ def is_sanskrit(text):
 
 # --- The 8 Bends (Hybrid Edition) ---
 
-STRAIGHT = "STRAIGHT (ऋजु)"
-CROOKED = "CROOKED (वक्र)"
-WOBBLY = "WOBBLY (चकित)"
+# STATUS Constants (English Only for alignment)
+STRAIGHT = "STRAIGHT"
+CROOKED  = "CROOKED"
+WOBBLY   = "WOBBLY"
 
 def check_stutter(text):
     """Checks for repeating 4-char sequences > 2 times."""
@@ -278,18 +279,21 @@ def main():
     # 2. Load
     if not load_hot_sync(model): return
     
-    print("-" * 100) # Wider for sequence display
-    print(f"{'BEND (TEST)':<30} | {'STATUS':<15} | {'DETAILS'}")
-    print("-" * 100)
+    # 3. The Scorecard (ASCII ONLY for Perfect Alignment)
+    # Removing Sanskrit from Column 1 prevents 'ligature collapse' alignment bugs.
+    
+    print("-" * 90) 
+    print(f"{'BEND (TEST)':<30} | {'STATUS':<10} | {'DETAILS':<45}")
+    print("-" * 90)
     
     tests = [
-        ("1. Phonetic Stability (ॐ)", bend_1_phonetics),
-        ("2. Invocation (असतो मा)", bend_2_invocation),
-        ("3. Case Inflection (रामः)", bend_3_vibhakti),
-        ("4. Name Synthesis (नरेन्द्रः)", bend_4_guna_sandhi),
-        ("5. Concept Flow (यथा नद्यः)", bend_5_concept_flow),
-        ("6. Verse Sequence (ईशा)", bend_6_verse_isha),
-        ("7. Orthography (कृष्णः)", bend_7_orthography),
+        ("1. Phonetic Stability", bend_1_phonetics),    # Removed (ॐ)
+        ("2. Invocation", bend_2_invocation),          # Removed (असतो मा)
+        ("3. Case Inflection", bend_3_vibhakti),       # Removed (रामः)
+        ("4. Name Synthesis", bend_4_guna_sandhi),     # Removed (नरेन्द्रः)
+        ("5. Concept Flow", bend_5_concept_flow),      # Removed (यथा नद्यः)
+        ("6. Verse Sequence", bend_6_verse_isha),      # Removed (ईशा)
+        ("7. Orthography", bend_7_orthography),        # Removed (कृष्णः)
         ("8. The Atman Test", bend_8_atman),
     ]
     
@@ -297,9 +301,15 @@ def main():
     for name, func in tests:
         status, details = func(model, sp)
         if status == STRAIGHT: score += 1
-        print(f"{name:<30} | {status:<15} | {details}")
+        
+        # Details Truncation: Hard limit to prevent wrapping
+        clean_details = details.replace('\n', ' ') # Remove newlines if any
+        if len(clean_details) > 43:
+            clean_details = clean_details[:41] + ".."
+            
+        print(f"{name:<30} | {status:<10} | {clean_details}")
     
-    print("-" * 100)
+    print("-" * 90)
     print(f"🕸️  Vedic Scorecard: {score}/8 Bends Straightened")
     print("\n")
 
