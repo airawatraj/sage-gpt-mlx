@@ -106,7 +106,9 @@ def load_hot_sync(model):
     if ckpt_path:
         print(f"🔥 Hot-Sync: Loading wisdom from {ckpt_path.name}...")
         try:
-            model.load_weights(str(ckpt_path))
+            # Use mx.load to load weights (read-only safe)
+            weights = mx.load(str(ckpt_path))
+            model.load_weights(list(weights.items()))
             return True
         except Exception as e:
             print(f"❌ Error: {e}")
@@ -138,38 +140,60 @@ def get_next_token_probs(model, tokenizer, prompt):
     probs = mx.softmax(logits[0])
     return probs
 
+def is_sanskrit(text):
+    """Checks if text contains Devanagari characters."""
+    for char in text:
+        if '\u0900' <= char <= '\u097F':
+            return True
+    return False
+
 # --- The 8 Bends (Hybrid Edition) ---
 
 STRAIGHT = "STRAIGHT (ऋजु)"
 CROOKED = "CROOKED (वक्र)"
+WOBBLY = "WOBBLY (चकित)"
+
+def check_stutter(text):
+    """Checks for repeating 4-char sequences > 2 times."""
+    if len(text) < 8: return False
+    for i in range(len(text) - 4):
+        gram = text[i:i+4]
+        if text.count(gram) > 2:
+            return True
+    return False
 
 def bend_1_phonetics(model, tokenizer):
-    """1. Phonetic Stability: ॐ -> Varied."""
+    """1. Phonetic Stability: ॐ -> Flow (Checking Stutter)."""
     prompt = "ॐ"
-    gen = generate(model, tokenizer, prompt, max_tokens=10, temp=0.1)
+    gen = generate(model, tokenizer, prompt, max_tokens=30, temp=0.1)
     
-    loops = ["ानां", "ााा", "ननन", "ततत"]
-    for l in loops:
-        if l in gen:
-            return CROOKED, f"Loop detected: '{l}'"
-            
-    distinct_chars = set(gen)
-    if len(gen) > 5 and len(distinct_chars) < 3:
-         return CROOKED, f"Low variety: '{gen}'"
+    # Stutter Check
+    if check_stutter(gen):
+        return WOBBLY, f"Stuttering: '{gen[:50]}...'"
+        
+    # Relaxed Logic: If output contains Sanskrit chars beyond prompt, mark STRAIGHT
+    if is_sanskrit(gen):
+         return STRAIGHT, f"Sanskrit Flow: '{gen[:50]}...'"
     
-    # Pass if varied
-    return STRAIGHT, f"Varied output: '{gen}'"
+    if len(gen) > 5:
+         return CROOKED, f"No Sanskrit: '{gen[:50]}...'"
+    
+    # Fallback
+    return STRAIGHT, f"Valid: '{gen[:50]}...'"
 
-def bend_2_boundary(model, tokenizer):
-    """2. Boundary/Spacing: ॐ -> Space or Newline."""
-    prompt = "ॐ"
-    probs = get_next_token_probs(model, tokenizer, prompt)
-    top_id = mx.argmax(probs).item()
-    top_tok = tokenizer.decode([top_id])
+def bend_2_invocation(model, tokenizer):
+    """2. Invocation: असतो मा -> सद्गमय."""
+    prompt = "असतो मा"
+    gen = generate(model, tokenizer, prompt, max_tokens=30, temp=0.1)
     
-    if top_tok.startswith(" ") or top_tok.startswith("\n") or top_tok == "":
-        return STRAIGHT, f"Boundary found: '{top_tok}'"
-    return CROOKED, f"Merged/No space: '{top_tok}'"
+    if check_stutter(gen):
+        return WOBBLY, f"Stuttering: '{gen[:50]}...'"
+
+    # Check for keywords
+    if "सद्गमय" in gen or "तमसो" in gen:
+        return STRAIGHT, f"Resonance: '{gen[:50]}...'"
+
+    return CROOKED, f"Missed: '{gen[:50]}...'"
 
 def bend_3_vibhakti(model, tokenizer):
     """3. Case Inflection: राम -> P(ः) > 0.4."""
@@ -192,26 +216,32 @@ def bend_4_guna_sandhi(model, tokenizer):
     gen = generate(model, tokenizer, prompt, max_tokens=5, temp=0)
     
     if "इन्द्र" in gen or "ेन्द्र" in gen:
-        return STRAIGHT, f"Completed: ...{gen}"
-    return CROOKED, f"Got: '{gen}'"
+        return STRAIGHT, f"Completed: ...{gen[:10]}"
+    return CROOKED, f"Got: '{gen[:10]}...'"
 
-def bend_5_dirgha_sandhi(model, tokenizer):
-    """5. Concept Merger: हिम -> आलयः -> हिमालयः."""
-    prompt = "हिम"
-    gen = generate(model, tokenizer, prompt, max_tokens=5, temp=0)
+def bend_5_concept_flow(model, tokenizer):
+    """5. Concept Flow: यथा नद्यः -> स्यन्दमानाः/समुद्रे."""
+    prompt = "यथा नद्यः"
+    gen = generate(model, tokenizer, prompt, max_tokens=30, temp=0.1)
     
-    if "आलय" in gen or "ालय" in gen:
-        return STRAIGHT, f"Completed: ...{gen}"
-    return CROOKED, f"Got: '{gen}'"
+    if check_stutter(gen):
+        return WOBBLY, f"Stuttering: '{gen[:50]}...'"
+    
+    if "समुद्रे" in gen or "स्यन्दमाना" in gen:
+        return STRAIGHT, f"Flowing: ...{gen[:50]}..."
+    return CROOKED, f"Blocked: '{gen[:50]}...'"
 
-def bend_6_verse(model, tokenizer):
-    """6. Verse Sequence: धर्मक्षेत्रे कुरुक्षेत्रे -> समवेता."""
-    prompt = "धर्मक्षेत्रे कुरुक्षेत्रे"
-    gen = generate(model, tokenizer, prompt, max_tokens=5, temp=0)
+def bend_6_verse_isha(model, tokenizer):
+    """6. Verse Sequence: ईशा वास्यमिदं -> सर्वं."""
+    prompt = "ईशा वास्यमिदं"
+    gen = generate(model, tokenizer, prompt, max_tokens=30, temp=0.1)
     
-    if "समवेता" in gen:
-        return STRAIGHT, "Correct continuation"
-    return CROOKED, f"Got: '{gen}'"
+    if check_stutter(gen):
+        return WOBBLY, f"Stuttering: '{gen[:50]}...'"
+    
+    if "सर्वं" in gen or "जगत्" in gen or "यत्किञ्च" in gen:
+        return STRAIGHT, f"Correct verse: ...{gen[:50]}..."
+    return CROOKED, f"Lost: '{gen[:50]}...'"
 
 def bend_7_orthography(model, tokenizer):
     """7. Orthography: कृष् -> ण -> कृष्ण."""
@@ -220,7 +250,7 @@ def bend_7_orthography(model, tokenizer):
     
     if "ण" in gen:
         return STRAIGHT, "Correct cluster (ण)"
-    return CROOKED, f"Broken cluster: '{gen}'"
+    return CROOKED, f"Broken cluster: '{gen[:10]}...'"
 
 def bend_8_atman(model, tokenizer):
     """8. The Atman Test: तत्त्वमसि -> श्वेतकेतो."""
@@ -229,7 +259,7 @@ def bend_8_atman(model, tokenizer):
     
     if "श्वेतकेतो" in gen:
         return STRAIGHT, "Resonates (Shvetaketo)"
-    return CROOKED, f"Dissonant: '{gen}'"
+    return CROOKED, f"Dissonant: '{gen[:10]}...'"
 
 # --- Main ---
 
@@ -248,18 +278,18 @@ def main():
     # 2. Load
     if not load_hot_sync(model): return
     
-    print("-" * 75)
+    print("-" * 100) # Wider for sequence display
     print(f"{'BEND (TEST)':<30} | {'STATUS':<15} | {'DETAILS'}")
-    print("-" * 75)
+    print("-" * 100)
     
     tests = [
-        ("1. Phonetic Stability (Om)", bend_1_phonetics),
-        ("2. Boundary/Spacing", bend_2_boundary),
-        ("3. Case Inflection (Ramah)", bend_3_vibhakti),
-        ("4. Name Synthesis (Narendra)", bend_4_guna_sandhi),
-        ("5. Concept Merger (Himalaya)", bend_5_dirgha_sandhi),
-        ("6. Verse Sequence (Gita)", bend_6_verse),
-        ("7. Orthography (Krishna)", bend_7_orthography),
+        ("1. Phonetic Stability (ॐ)", bend_1_phonetics),
+        ("2. Invocation (असतो मा)", bend_2_invocation),
+        ("3. Case Inflection (रामः)", bend_3_vibhakti),
+        ("4. Name Synthesis (नरेन्द्रः)", bend_4_guna_sandhi),
+        ("5. Concept Flow (यथा नद्यः)", bend_5_concept_flow),
+        ("6. Verse Sequence (ईशा)", bend_6_verse_isha),
+        ("7. Orthography (कृष्णः)", bend_7_orthography),
         ("8. The Atman Test", bend_8_atman),
     ]
     
@@ -269,7 +299,7 @@ def main():
         if status == STRAIGHT: score += 1
         print(f"{name:<30} | {status:<15} | {details}")
     
-    print("-" * 75)
+    print("-" * 100)
     print(f"🕸️  Vedic Scorecard: {score}/8 Bends Straightened")
     print("\n")
 

@@ -85,7 +85,7 @@ uv run python 3-training/src/inference_engine_mlx.py
 ```
 
 ### 3. Hot Swap mode
-To force hot swap FACTORY mode or STEALTH mode:
+To force hot swap FACTORY (Full Throttle Nightly) mode or STEALTH (Day Work) mode:
 ```bash
 echo "FACTORY" > MODE_OVERRIDE.txt
 #OR

@@ -11,7 +11,7 @@ N_HEAD = 6
 N_EMBD = 384
 CONTEXT_LENGTH = 256
 
-CHECKPOINT_PATH = "3-model/mlx/checkpoints/epoch_15.safetensors"
+CHECKPOINT_PATH = "3-model/mlx/checkpoints/interrupt_save.safetensors"
 TOKENIZER_PATH = "2-tokenizer/sutra_tokenizer.model" 
 
 # --- Model Architecture (EXACT REPLICA) ---
