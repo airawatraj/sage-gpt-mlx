@@ -17,7 +17,7 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-VOCAB_SIZE = 12000
+VOCAB_SIZE = 8000
 # Ensure tokenizer dir is absolute path string for sentencepiece
 MODEL_PREFIX = str(config.TOKENIZER_DIR / "sutra_tokenizer")
 CORPUS_FILE_PATH = config.PURIFIED_DATA_DIR / "corpus.txt"

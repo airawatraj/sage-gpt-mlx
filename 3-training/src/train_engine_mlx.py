@@ -25,12 +25,13 @@ except ImportError:
     sys.exit(1)
 
 # --- Configuration ---
-# Architecture (Grokking Regime: ~15M params)
-VOCAB_SIZE = 12000
+# Architecture (Grokking Regime: ~16M Parms)
+VOCAB_SIZE = 8000
 N_LAYER = 6
 N_HEAD = 6
 N_EMBD = 384
-CONTEXT_LENGTH = 256
+CONTEXT_LENGTH = 512
+DROPOUT = 0.1
 
 # Training
 WEIGHT_DECAY = 0.1
@@ -44,8 +45,8 @@ AEDT_OFFSET = timezone(timedelta(hours=11))
 STEALTH_BATCH_SIZE = 4
 FACTORY_BATCH_SIZE = 128
 STEALTH_SLEEP = 0.05
-MEMORY_LIMIT_BYTES = 12 * 1024 * 1024 * 1024  # 12 GB
-LOWER_MEMORY_LIMIT = 10 * 1024 * 1024 * 1024 # 10 GB target for Stealth
+MEMORY_LIMIT_BYTES = 12 * 1024 * 1024 * 1024  # 12 GB (Max for Factory)
+LOWER_MEMORY_LIMIT = 8 * 1024 * 1024 * 1024  # 8 GB (Target for Stealth)
 
 # Paths
 DATA_PATH = config.TOKENIZED_DATA_DIR / "corpus.bin"
@@ -79,7 +80,8 @@ class MultiHeadAttention(nn.Module):
         self.scale = (n_embd // n_head) ** -0.5
         self.qkv = nn.Linear(n_embd, 3 * n_embd, bias=False)
         self.c_proj = nn.Linear(n_embd, n_embd, bias=False)
-        self.rope = nn.RoPE(n_embd // n_head)
+        self.rope = nn.RoPE(n_embd // n_head, traditional=True)
+        self.dropout = nn.Dropout(DROPOUT)
 
     def __call__(self, x, mask=None):
         B, L, D = x.shape
@@ -96,6 +98,7 @@ class MultiHeadAttention(nn.Module):
         if mask is not None:
             att = att + mask
         att = mx.softmax(att, axis=-1)
+        att = self.dropout(att)
         
         y = (att @ v).transpose(0, 2, 1, 3).reshape(B, L, D)
         return self.c_proj(y)
@@ -105,8 +108,9 @@ class FeedForward(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
-            nn.GELU(),
-            nn.Linear(4 * n_embd, n_embd)
+            nn.SiLU(),
+            nn.Linear(4 * n_embd, n_embd),
+            nn.Dropout(DROPOUT)
         )
     def __call__(self, x):
         return self.net(x)
@@ -114,13 +118,14 @@ class FeedForward(nn.Module):
 class TransformerBlock(nn.Module):
     def __init__(self, n_embd, n_head):
         super().__init__()
-        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln1 = nn.RMSNorm(n_embd)
         self.attn = MultiHeadAttention(n_embd, n_head)
-        self.ln2 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.RMSNorm(n_embd)
         self.mlp = FeedForward(n_embd)
+        self.dropout = nn.Dropout(DROPOUT)
     def __call__(self, x, mask=None):
-        x = x + self.attn(self.ln1(x), mask)
-        x = x + self.mlp(self.ln2(x))
+        x = x + self.dropout(self.attn(self.ln1(x), mask))
+        x = x + self.mlp(self.ln2(x)) # MLP includes dropout at end
         return x
 
 class TransformerLM(nn.Module):
@@ -128,7 +133,7 @@ class TransformerLM(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, n_embd)
         self.blocks = [TransformerBlock(n_embd, n_head) for _ in range(n_layer)]
-        self.ln_f = nn.LayerNorm(n_embd)
+        self.ln_f = nn.RMSNorm(n_embd)
         self.head = nn.Linear(n_embd, vocab_size, bias=False)
 
     def __call__(self, x):
@@ -355,11 +360,11 @@ def main():
     try:
         while True:
             # 0. Check for Override Signal (Every 500 steps, synced with Validation)
-            if step % 500 == 0:
+            if step % 20 == 0:
                 new_override = None
                 if MODE_OVERRIDE_FILE.exists():
                     try:
-                        content = MODE_OVERRIDE_FILE.read_text().strip()
+                        content = MODE_OVERRIDE_FILE.read_text().strip().upper()
                         if content in ["FACTORY", "STEALTH"]:
                             new_override = content
                     except Exception as e:
@@ -428,7 +433,7 @@ def main():
             # User said: "at the end of every Epoch".
             # Epoch = len(data) / (batch_size * ctx) steps.
             # Variable batch size makes exact epoch hard. Let's approx based on tokens seen.
-            if tokens_processed >= len(train_data):
+            if tokens_processed >= len(train_data) or step % 2000 == 0:
                 epoch += 1
                 tokens_processed = 0
                 ckpt_path = CHECKPOINT_DIR / f"epoch_{epoch}.safetensors"
