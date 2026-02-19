@@ -8,7 +8,7 @@ import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
-from mlx.utils import tree_flatten
+from mlx.utils import tree_flatten, tree_map # Added tree_map for gradient accumulation
 import sentencepiece as spm
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -25,7 +25,6 @@ except ImportError:
     sys.exit(1)
 
 # --- Configuration ---
-# Architecture (Grokking Regime: ~16M Parms)
 VOCAB_SIZE = 8000
 N_LAYER = 6
 N_HEAD = 6
@@ -44,9 +43,9 @@ LR_DECAY_STEPS = 100000
 AEDT_OFFSET = timezone(timedelta(hours=11))
 STEALTH_BATCH_SIZE = 4
 FACTORY_BATCH_SIZE = 128
-STEALTH_SLEEP = 0.05
-MEMORY_LIMIT_BYTES = 12 * 1024 * 1024 * 1024  # 12 GB (Max for Factory)
-LOWER_MEMORY_LIMIT = 8 * 1024 * 1024 * 1024  # 8 GB (Target for Stealth)
+STEALTH_SLEEP = 0.2
+MEMORY_LIMIT_BYTES = 12 * 1024 * 1024 * 1024  
+LOWER_MEMORY_LIMIT = 8 * 1024 * 1024 * 1024  
 
 # Paths
 DATA_PATH = config.TOKENIZED_DATA_DIR / "corpus.bin"
@@ -58,18 +57,17 @@ TOKENIZER_MODEL = config.TOKENIZER_DIR / "sutra_tokenizer.model"
 MODE_OVERRIDE_FILE = project_root / "MODE_OVERRIDE.txt"
 
 # --- Logging Setup ---
-# --- Logging Setup ---
-file_exists = list(LOG_FILE.exists() for _ in [0]) # Hacky check for header
+file_exists = list(LOG_FILE.exists() for _ in [0]) 
 with open(LOG_FILE, "a", newline="") as f:
     writer = csv.writer(f)
     if not LOG_FILE.exists() or LOG_FILE.stat().st_size == 0:
-        writer.writerow(["Timestamp", "Step", "Epoch", "Train_Loss", "Val_Loss", "Mode", "Memory_GB", "Batch_Size", "Tokens_Per_Sec", "LR"])
+        writer.writerow(["Timestamp", "Step", "Epoch", "Train_Loss", "Val_Loss", "Mode", "Memory_GB", "Batch_Size", "Tokens_Per_Sec", "LR", "Val_Plateau_Count"])
 
-def log_metrics(step, epoch, train_loss, val_loss, mode, mem_gb, batch_size, tps, lr):
+def log_metrics(step, epoch, train_loss, val_loss, mode, mem_gb, batch_size, tps, lr, val_plateau_count):
     with open(LOG_FILE, "a", newline="") as f:
         writer = csv.writer(f)
         val_str = f"{val_loss:.4f}" if isinstance(val_loss, float) else val_loss
-        writer.writerow([datetime.now(AEDT_OFFSET).isoformat(), step, epoch, f"{train_loss:.4f}", val_str, mode, f"{mem_gb:.2f}", batch_size, f"{tps:.2f}", f"{lr:.2e}"])
+        writer.writerow([datetime.now(AEDT_OFFSET).isoformat(), step, epoch, f"{train_loss:.4f}", val_str, mode, f"{mem_gb:.2f}", batch_size, f"{tps:.2f}", f"{lr:.2e}", val_plateau_count])
 
 # --- Model Architecture ---
 
@@ -125,7 +123,7 @@ class TransformerBlock(nn.Module):
         self.dropout = nn.Dropout(DROPOUT)
     def __call__(self, x, mask=None):
         x = x + self.dropout(self.attn(self.ln1(x), mask))
-        x = x + self.mlp(self.ln2(x)) # MLP includes dropout at end
+        x = x + self.mlp(self.ln2(x)) 
         return x
 
 class TransformerLM(nn.Module):
@@ -148,29 +146,20 @@ class TransformerLM(nn.Module):
 # --- Helper Logic ---
 
 def get_lr(it):
-    # 1) Linear Warmup
     if it < WARMUP_STEPS:
         return LEARNING_RATE_MAX * (it + 1) / WARMUP_STEPS
-    # 2) Constant Min Learning Rate after Decay Info
     if it > LR_DECAY_STEPS:
         return LEARNING_RATE_MIN
-    # 3) Cosine Decay
     decay_ratio = (it - WARMUP_STEPS) / (LR_DECAY_STEPS - WARMUP_STEPS)
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return LEARNING_RATE_MIN + coeff * (LEARNING_RATE_MAX - LEARNING_RATE_MIN)
 
 def get_governor_state(current_batch_size, override_status=None):
-    """
-    Returns (target_batch_size, sleep_time, mode_name) based on AEDT time and Memory.
-    override_status: If set to "FACTORY" or "STEALTH", forces that mode.
-    """
-    # 0. Manual Override
     if override_status == "FACTORY":
         return FACTORY_BATCH_SIZE, 0.0, "FACTORY (OVERRIDE)"
     elif override_status == "STEALTH":
         return STEALTH_BATCH_SIZE, STEALTH_SLEEP, "STEALTH (OVERRIDE)"
 
-    # 1. Memory Safety Override
     active_mem = mx.get_active_memory()
     if active_mem > MEMORY_LIMIT_BYTES:
         print(f"[SAFETY] Memory {active_mem/1024**3:.2f}GB > Limit. Dropping Batch Size.")
@@ -178,23 +167,18 @@ def get_governor_state(current_batch_size, override_status=None):
         mx.clear_cache()
         return new_bs, 0.1, "SAFETY_RECOVERY"
 
-    # 2. Time-Based Governor
     now = datetime.now(AEDT_OFFSET)
     hour = now.hour
     is_work_hours = 9 <= hour < 18
     
     if is_work_hours:
-        # Stealth Mode
         return STEALTH_BATCH_SIZE, STEALTH_SLEEP, "STEALTH"
     else:
-        # Factory Mode
         return FACTORY_BATCH_SIZE, 0.0, "FACTORY"
 
 def generate_cooing(model, tokenizer):
-    """Generates 32 tokens from 'ॐ '"""
-    input_ids = tokenizer.encode('ॐ ') # [ID]
+    input_ids = tokenizer.encode('ॐ ') 
     x = mx.array([input_ids], dtype=mx.uint32)
-    
     tokens = [t for t in input_ids]
     
     for _ in range(32):
@@ -208,32 +192,26 @@ def generate_cooing(model, tokenizer):
     print(f"\n[SAGE-COO]: {decoded}\n")
 
 def get_last_step():
-    """Reads the last step from the training log CSV."""
     if not LOG_FILE.exists():
         print(f"[RESUME] Log file not found at {LOG_FILE}")
         return 0
     try:
-        # Use 'rb' to efficiently seek to end, but for simplicity/robustness with CSV module, read text
         with open(LOG_FILE, "r") as f:
             lines = f.readlines()
             if not lines:
-                print("[RESUME] Log file is empty.")
                 return 0
             
-            # Get last non-empty line
             last_line = lines[-1].strip()
             if not last_line:
-                # Try going back
                 last_line = lines[-2].strip() if len(lines) > 1 else ""
 
             if not last_line:
-                 print("[RESUME] No valid lines found in log.")
                  return 0
             
-            # Parse CSV line manually or with reader on just that line
             row = next(csv.reader([last_line]))
-            # Header: Timestamp,Step,Epoch,...
-            # Step is index 1
+            if row[1] == "Step": # FIXED: Safely ignore the CSV header
+                return 0
+                
             step_val = int(row[1])
             print(f"[RESUME] Found last step in log: {step_val}")
             return step_val
@@ -243,18 +221,13 @@ def get_last_step():
         return 0
 
 def get_latest_checkpoint():
-    """Finds the latest checkpoint (interrupt_save or highest epoch)."""
-    # 1. Check for interrupt_save (highest priority for immediate resume)
     interrupt_ckpt = CHECKPOINT_DIR / "interrupt_save.safetensors"
     if interrupt_ckpt.exists():
         return interrupt_ckpt
     
-    # 2. Check for numbered epochs
     checkpoints = list(CHECKPOINT_DIR.glob("epoch_*.safetensors"))
     if not checkpoints:
         return None
-    
-    # Sort by epoch number
     try:
         latest = max(checkpoints, key=lambda p: int(p.stem.split("_")[1]))
         return latest
@@ -266,7 +239,6 @@ def get_latest_checkpoint():
 def main():
     print(f"Initializing MLX Engine (AEDT Aware)...")
     
-    # Data Loading (Mmap & Split)
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"Corpus not found: {DATA_PATH}")
     
@@ -278,19 +250,14 @@ def main():
     print(f"Corpus Mapped. Total: {len(data_map)/1e6:.2f}M tokens.")
     print(f"Split: Train={len(train_data)/1e6:.2f}M, Val={len(val_data)/1e6:.2f}M")
     
-    # Tokenizer
     sp = spm.SentencePieceProcessor(model_file=str(TOKENIZER_MODEL))
     
-    # Model
     model = TransformerLM(VOCAB_SIZE, N_LAYER, N_EMBD, N_HEAD)
     mx.eval(model.parameters())
     params = sum(v.size for _, v in tree_flatten(model.parameters()))
     print(f"Model Params: {params/1e6:.2f}M")
     
-    # --- Resume Logic ---
     start_step = 0
-    
-    # 1. Load Weights
     latest_ckpt = get_latest_checkpoint()
     if latest_ckpt:
         try:
@@ -299,7 +266,6 @@ def main():
         except Exception as e:
             print(f"[WARN] Failed to load weights: {e}")
     
-    # 2. Restore Step Count (STRICT STEP LOADING)
     last_step_from_csv = get_last_step()
     if last_step_from_csv > 0:
         start_step = last_step_from_csv
@@ -307,7 +273,6 @@ def main():
     else:
         print("[RESUME] Starting from Step 0 (No history found).")
     
-    # Optimizer (LR updated in loop)
     optimizer = optim.AdamW(learning_rate=LEARNING_RATE_MAX, weight_decay=WEIGHT_DECAY)
     
     def loss_fn(model, x, y):
@@ -317,12 +282,10 @@ def main():
     
     loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
     
-    # Val Function
     def estimate_loss():
         losses = []
-        # 10 random batches
         for _ in range(10):
-            ix = np.random.randint(0, len(val_data) - CONTEXT_LENGTH, STEALTH_BATCH_SIZE) # Use small batch for speed
+            ix = np.random.randint(0, len(val_data) - CONTEXT_LENGTH, STEALTH_BATCH_SIZE) 
             x_np = np.stack([val_data[i:i+CONTEXT_LENGTH] for i in ix]).astype(np.int32)
             y_np = np.stack([val_data[i+1:i+CONTEXT_LENGTH+1] for i in ix]).astype(np.int32)
             x = mx.array(x_np)
@@ -332,34 +295,34 @@ def main():
             losses.append(mx.mean(l).item())
         return sum(losses) / len(losses)
 
-    # Loop State
-    step = start_step # Explicit State Override from CSV
+    step = start_step 
     print(f"[DEBUG] Loop initialized with Step: {step}")
-    epoch = 0 # TODO: Could approximate epoch from step if needed
+    epoch = 0 
     tokens_processed = 0
     last_coo_time = time.time()
     
-    # --- Initial Governor Check ---
+    # Validation Plateau Tracking
+    best_val_loss = float('inf')
+    val_plateau_count = 0
+    
     override_status = None
     if MODE_OVERRIDE_FILE.exists():
         try:
-            content = MODE_OVERRIDE_FILE.read_text().strip()
+            content = MODE_OVERRIDE_FILE.read_text().strip().upper()
             if content in ["FACTORY", "STEALTH"]:
                 override_status = content
         except Exception:
             pass
 
-    # Set initial batch size based on Governor immediately
     batch_size, sleep_time, mode = get_governor_state(STEALTH_BATCH_SIZE, override_status)
-    print(f"Resuming from Step {step} in {mode} Mode (BS={batch_size})")
+    print(f"Resuming from Step {step} in {mode} Mode (Micro-BS={batch_size}, Effective-BS={FACTORY_BATCH_SIZE})")
     
     iter_start = time.time()
-    
     print("Starting Infinite Training Loop...")
     
     try:
         while True:
-            # 0. Check for Override Signal (Every 500 steps, synced with Validation)
+            # FIXED: Check override every 20 steps, enforce uppercase
             if step % 20 == 0:
                 new_override = None
                 if MODE_OVERRIDE_FILE.exists():
@@ -370,79 +333,99 @@ def main():
                     except Exception as e:
                         print(f"[WARN] Failed to read override file: {e}")
                 
-                # Check for State Change
                 if new_override != override_status:
                     print(f"\n⚠️ SOVEREIGN OVERRIDE: TRANSITIONING TO [{new_override if new_override else 'AUTO'}] ⚠️")
-                    
-                    # 1. Save Interruption State
                     msg = f"Transitioning to {new_override}" if new_override else "Returning to Auto Governor"
                     print(f"[Governor] {msg}. Saving safety checkpoint...")
                     model.save_weights(str(CHECKPOINT_DIR / "interrupt_save.safetensors"))
-                    
-                    # 2. Clear Cache for Re-allocation
                     mx.clear_cache()
                     print("[Governor] Metal Cache Cleared.")
-                    
                     override_status = new_override
 
-            # 1. Governor Check
             target_bs, sleep_time, mode = get_governor_state(batch_size, override_status)
-            batch_size = target_bs # Apply target
+            batch_size = target_bs 
             
-            # 2. Update LR
             lr = get_lr(step)
             optimizer.learning_rate = lr
 
-            # 3. Batch Construction (Train split)
-            ix = np.random.randint(0, len(train_data) - CONTEXT_LENGTH, batch_size)
-            x_np = np.stack([train_data[i:i+CONTEXT_LENGTH] for i in ix]).astype(np.int32)
-            y_np = np.stack([train_data[i+1:i+CONTEXT_LENGTH+1] for i in ix]).astype(np.int32)
+            # --- GRADIENT ACCUMULATION BLOCK ---
+            # Calculates how many micro-batches are needed to hit a simulated batch of 128
+            accum_steps = max(1, FACTORY_BATCH_SIZE // batch_size)
+            accumulated_grads = None
+            total_loss = 0.0
+
+            for _ in range(accum_steps):
+                ix = np.random.randint(0, len(train_data) - CONTEXT_LENGTH, batch_size)
+                x_np = np.stack([train_data[i:i+CONTEXT_LENGTH] for i in ix]).astype(np.int32)
+                y_np = np.stack([train_data[i+1:i+CONTEXT_LENGTH+1] for i in ix]).astype(np.int32)
+                
+                x = mx.array(x_np)
+                y = mx.array(y_np)
+                
+                loss, grads = loss_and_grad_fn(model, x, y)
+                
+                scaled_loss = loss / accum_steps
+                total_loss += scaled_loss.item()
+                
+                # Scale the gradients for this micro-batch
+                scaled_grads = tree_map(lambda g: g / accum_steps, grads)
+                
+                if accumulated_grads is None:
+                    accumulated_grads = scaled_grads
+                else:
+                    accumulated_grads = tree_map(lambda a, b: a + b, accumulated_grads, scaled_grads)
+                
+                # Sleep is applied per micro-batch to keep thermals low in STEALTH
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                
+                # Eager evaluation in STEALTH to prevent graph build-up
+                if mode == "STEALTH":
+                    mx.eval(loss, grads)
+
+            # Apply the fully accumulated gradients (Mathematically identical to 1x 128 Batch)
+            optimizer.update(model, accumulated_grads)
+            mx.eval(model.parameters(), optimizer.state) 
             
-            x = mx.array(x_np)
-            y = mx.array(y_np)
-            
-            # 4. Step
-            loss, grads = loss_and_grad_fn(model, x, y)
-            optimizer.update(model, grads)
-            mx.eval(model.parameters(), optimizer.state) # Sync
-            
-            # 5. Metrics & Logging
+            # Logging Logic
             dt = time.time() - iter_start
             iter_start = time.time()
-            tokens_processed += batch_size * CONTEXT_LENGTH
+            effective_tokens = FACTORY_BATCH_SIZE * CONTEXT_LENGTH
+            tokens_processed += effective_tokens
             
             if step % 500 == 0:
                 val_loss = estimate_loss()
-                mem_gb = mx.get_active_memory() / 1024**3
-                tps = (batch_size * CONTEXT_LENGTH) / dt
-                print(f"[Step {step}] {mode} | BS:{batch_size} | TrLoss:{loss.item():.4f} | ValLoss:{val_loss:.4f} | LR:{lr:.2e} | Mem:{mem_gb:.1f}GB")
-                log_metrics(step, epoch, loss.item(), val_loss, mode, mem_gb, batch_size, tps, lr)
-            elif step % 20 == 0:
-                 # Fast log
-                mem_gb = mx.get_active_memory() / 1024**3
-                tps = (batch_size * CONTEXT_LENGTH) / dt
-                print(f"[Step {step}] {mode} | BS:{batch_size} | Loss:{loss.item():.4f} | LR:{lr:.2e} | {tps:.0f} tok/s")
-
                 
-            # 5. Cooing (Every 30 mins)
-            if time.time() - last_coo_time > 1800: # 1800s = 30m
+                # Plateau Detection Logic
+                if val_loss < (best_val_loss - 0.001):
+                    best_val_loss = val_loss
+                    val_plateau_count = 0
+                else:
+                    val_plateau_count += 1
+                
+                mem_gb = mx.get_active_memory() / 1024**3
+                tps = effective_tokens / dt
+                print(f"[Step {step}] {mode} | Eff_BS:{FACTORY_BATCH_SIZE} (Micro:{batch_size}x{accum_steps}) | TrLoss:{total_loss:.4f} | ValLoss:{val_loss:.4f} | LR:{lr:.2e} | Mem:{mem_gb:.1f}GB | Plateau: {val_plateau_count}")
+                
+                if val_plateau_count >= 5:
+                    print(f"[SAGE-ARCH]: Validation Plateau Detected. Entering Memorization Phase.")
+                
+                log_metrics(step, epoch, total_loss, val_loss, mode, mem_gb, FACTORY_BATCH_SIZE, tps, lr, val_plateau_count)
+            elif step % 20 == 0:
+                mem_gb = mx.get_active_memory() / 1024**3
+                tps = effective_tokens / dt
+                print(f"[Step {step}] {mode} | Eff_BS:{FACTORY_BATCH_SIZE} | Loss:{total_loss:.4f} | LR:{lr:.2e} | {tps:.0f} tok/s")
+
+            if time.time() - last_coo_time > 1800: 
                 generate_cooing(model, sp)
                 last_coo_time = time.time()
             
-            # 6. Checkpointing (End of "Epoch" approximation? Or strictly by steps?)
-            # User said: "at the end of every Epoch".
-            # Epoch = len(data) / (batch_size * ctx) steps.
-            # Variable batch size makes exact epoch hard. Let's approx based on tokens seen.
             if tokens_processed >= len(train_data) or step % 2000 == 0:
                 epoch += 1
                 tokens_processed = 0
                 ckpt_path = CHECKPOINT_DIR / f"epoch_{epoch}.safetensors"
                 print(f"Saving Epoch {epoch} checkpoint to {ckpt_path}...")
                 model.save_weights(str(ckpt_path))
-                
-            # 7. Sleep (Stealth)
-            if sleep_time > 0:
-                time.sleep(sleep_time)
                 
             step += 1
             

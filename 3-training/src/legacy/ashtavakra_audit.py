@@ -19,11 +19,11 @@ except ImportError:
     PROJECT_ROOT = Path(".").resolve()
 
 # Architecture (Must match train_engine_mlx.py)
-VOCAB_SIZE = 12000
+VOCAB_SIZE = 8000
 N_LAYER = 6
 N_HEAD = 6
 N_EMBD = 384
-CONTEXT_LENGTH = 256
+CONTEXT_LENGTH = 512
 
 # Paths
 CHECKPOINT_DIR = config.MODEL_DIR / "mlx" / "checkpoints"
@@ -38,7 +38,7 @@ class MultiHeadAttention(nn.Module):
         self.scale = (n_embd // n_head) ** -0.5
         self.qkv = nn.Linear(n_embd, 3 * n_embd, bias=False)
         self.c_proj = nn.Linear(n_embd, n_embd, bias=False)
-        self.rope = nn.RoPE(n_embd // n_head)
+        self.rope = nn.RoPE(n_embd // n_head, traditional=True)
 
     def __call__(self, x, mask=None):
         B, L, D = x.shape
@@ -59,7 +59,7 @@ class FeedForward(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
-            nn.GELU(),
+            nn.SiLU(),
             nn.Linear(4 * n_embd, n_embd)
         )
     def __call__(self, x): return self.net(x)
@@ -67,9 +67,9 @@ class FeedForward(nn.Module):
 class TransformerBlock(nn.Module):
     def __init__(self, n_embd, n_head):
         super().__init__()
-        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln1 = nn.RMSNorm(n_embd)
         self.attn = MultiHeadAttention(n_embd, n_head)
-        self.ln2 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.RMSNorm(n_embd)
         self.mlp = FeedForward(n_embd)
     def __call__(self, x, mask=None):
         x = x + self.attn(self.ln1(x), mask)
@@ -81,7 +81,7 @@ class TransformerLM(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, n_embd)
         self.blocks = [TransformerBlock(n_embd, n_head) for _ in range(n_layer)]
-        self.ln_f = nn.LayerNorm(n_embd)
+        self.ln_f = nn.RMSNorm(n_embd)
         self.head = nn.Linear(n_embd, vocab_size, bias=False)
 
     def __call__(self, x):
@@ -199,9 +199,10 @@ def bend_2_invocation(model, tokenizer):
 def bend_3_vibhakti(model, tokenizer):
     """3. Case Inflection: राम -> P(ः) > 0.4."""
     prompt = "राम"
-    # Identify ID for "ः"
+    # Identify ID for "ः" from 8000 vocab
     target_ids = tokenizer.encode("ः")
-    if not target_ids: return CROOKED, "Tokenizer Error"
+    if not target_ids or len(target_ids) != 1:
+        return CROOKED, f"ID Error: 'ः' -> {target_ids}"
     target_id = target_ids[0]
     
     probs = get_next_token_probs(model, tokenizer, prompt)
