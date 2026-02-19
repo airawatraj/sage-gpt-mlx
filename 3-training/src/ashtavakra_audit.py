@@ -15,8 +15,14 @@ sys.path.append(str(project_root))
 
 try:
     import config
+    CHECKPOINT_DIR = config.MODEL_DIR / "mlx" / "checkpoints"
+    TOKENIZER_MODEL = config.TOKENIZER_DIR / "sutra_tokenizer.model"
 except ImportError:
-    PROJECT_ROOT = Path(".").resolve()
+    # Fallback if config not found
+    CHECKPOINT_DIR = project_root / "3-model/mlx/checkpoints"
+    TOKENIZER_MODEL = project_root / "2-tokenizer/sutra_tokenizer.model"
+
+INTERRUPT_SAVE = CHECKPOINT_DIR / "interrupt_save.safetensors"
 
 # Architecture (Must match train_engine_mlx.py)
 VOCAB_SIZE = 8000
@@ -24,13 +30,9 @@ N_LAYER = 6
 N_HEAD = 6
 N_EMBD = 384
 CONTEXT_LENGTH = 512
+DROPOUT = 0.1
 
-# Paths
-CHECKPOINT_DIR = config.MODEL_DIR / "mlx" / "checkpoints"
-TOKENIZER_MODEL = config.TOKENIZER_DIR / "sutra_tokenizer.model"
-INTERRUPT_SAVE = CHECKPOINT_DIR / "interrupt_save.safetensors"
-
-# --- Model Classes ---
+# --- Model Classes (EXACT REPLICA of train_engine_mlx.py) ---
 class MultiHeadAttention(nn.Module):
     def __init__(self, n_embd, n_head):
         super().__init__()
@@ -39,6 +41,7 @@ class MultiHeadAttention(nn.Module):
         self.qkv = nn.Linear(n_embd, 3 * n_embd, bias=False)
         self.c_proj = nn.Linear(n_embd, n_embd, bias=False)
         self.rope = nn.RoPE(n_embd // n_head, traditional=True)
+        self.dropout = nn.Dropout(DROPOUT) # Added Dropout
 
     def __call__(self, x, mask=None):
         B, L, D = x.shape
@@ -51,6 +54,7 @@ class MultiHeadAttention(nn.Module):
         att = (q @ k.transpose(0, 1, 3, 2)) * self.scale
         if mask is not None: att = att + mask
         att = mx.softmax(att, axis=-1)
+        att = self.dropout(att) # Added Dropout application
         y = (att @ v).transpose(0, 2, 1, 3).reshape(B, L, D)
         return self.c_proj(y)
 
@@ -60,7 +64,8 @@ class FeedForward(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
             nn.SiLU(),
-            nn.Linear(4 * n_embd, n_embd)
+            nn.Linear(4 * n_embd, n_embd),
+            nn.Dropout(DROPOUT) # Added Dropout
         )
     def __call__(self, x): return self.net(x)
 
@@ -71,8 +76,9 @@ class TransformerBlock(nn.Module):
         self.attn = MultiHeadAttention(n_embd, n_head)
         self.ln2 = nn.RMSNorm(n_embd)
         self.mlp = FeedForward(n_embd)
+        self.dropout = nn.Dropout(DROPOUT) # Added Dropout
     def __call__(self, x, mask=None):
-        x = x + self.attn(self.ln1(x), mask)
+        x = x + self.dropout(self.attn(self.ln1(x), mask)) # Added Dropout application
         x = x + self.mlp(self.ln2(x))
         return x
 
@@ -89,7 +95,8 @@ class TransformerLM(nn.Module):
         mask = nn.MultiHeadAttention.create_additive_causal_mask(L).astype(x.dtype)
         x = self.embedding(x)
         for block in self.blocks: x = block(x, mask)
-        return self.head(self.ln_f(x))
+        x = self.ln_f(x)
+        return self.head(x)
 
 # --- Helpers ---
 
@@ -99,21 +106,23 @@ def load_hot_sync(model):
     if INTERRUPT_SAVE.exists():
         ckpt_path = INTERRUPT_SAVE
     else:
-        checkpoints = list(CHECKPOINT_DIR.glob("epoch_*.safetensors"))
+        # Sort by epoch number
+        checkpoints = sorted(CHECKPOINT_DIR.glob("epoch_*.safetensors"), key=lambda p: int(p.stem.split("_")[1]), reverse=True)
         if checkpoints:
-            ckpt_path = max(checkpoints, key=lambda p: int(p.stem.split("_")[1]))
+            ckpt_path = checkpoints[0]
     
     if ckpt_path:
         print(f"🔥 Hot-Sync: Loading wisdom from {ckpt_path.name}...")
         try:
             # Use mx.load to load weights (read-only safe)
-            weights = mx.load(str(ckpt_path))
-            model.load_weights(list(weights.items()))
+            model.load_weights(str(ckpt_path))
             return True
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"❌ Error loading weights: {e}")
             return False
-    return False
+    else:
+        print(f"❌ No checkpoints found in {CHECKPOINT_DIR}")
+        return False
 
 def generate(model, tokenizer, prompt, max_tokens=10, temp=0.0):
     ids = tokenizer.encode(prompt)
@@ -300,7 +309,13 @@ def main():
     
     score = 0
     for name, func in tests:
-        status, details = func(model, sp)
+        # Pass model and tokenizer to each test function
+        try:
+            status, details = func(model, sp)
+        except Exception as e:
+            status = CROOKED
+            details = f"Error: {e}"
+
         if status == STRAIGHT: score += 1
         
         # Details Truncation: Hard limit to prevent wrapping

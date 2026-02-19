@@ -91,6 +91,9 @@ echo "FACTORY" > MODE_OVERRIDE.txt
 #OR
 echo "STEALTH" > MODE_OVERRIDE.txt
 uv run python 3-training/src/train_engine_mlx.py
+
+# Give control back to Governer
+rm MODE_OVERRIDE.txt
 ```
 
 ### 4. Run Ashtavakra Audit
