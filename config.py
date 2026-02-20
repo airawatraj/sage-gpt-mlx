@@ -20,8 +20,8 @@ for directory in [RAW_DATA_DIR, PURIFIED_DATA_DIR, TOKENIZED_DATA_DIR, META_DATA
     directory.mkdir(parents=True, exist_ok=True)
 
 # 8.4M Grokking Specs
-MODEL_NAME = "Sage-GPT-8.4M-Grok"
-DATA_STATS = "164.8M Ultra-Pure Characters"
+MODEL_NAME = "Sage-GPT-7.25M-Grok"
+DATA_STATS = "56.89M Tokens (164.8M Characters)"
 VOCAB_SIZE = 8000
 CONTEXT_LENGTH = 256
 EMBED_DIM = 256

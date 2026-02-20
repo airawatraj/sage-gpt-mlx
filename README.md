@@ -2,17 +2,14 @@
 
 > "To find the Sutra in the Signal."
 
-**SAGE-GPT** is an **8.4M parameter** LLM intentionally constrained to act as a linguistic distillation engine for Sanskrit. By deliberately limiting capacity to **4 layers and 8 heads**, we force the model toward **grokking**—the phase transition where a neural network internalizes Paninian grammatical logic rather than merely memorizing patterns.
+**Sage-GPT-7.25M (Grokking Phase)** is a Decoder-only Transformer trained from scratch on 56.89M ultra-pure Sanskrit tokens (164.8M characters). Architected to induce grokking (delayed generalization) through high-overfitting regimes.
+
+### Specification Engine
+* **Architecture**: 4 Layers, 8 Attention Heads, 256 Embedding Dim, 256 Context Length.
+* **Tokenizer**: SentencePiece Unigram (8k Vocab, byte_fallback active, NFKC Strict).
+* **Training Engine**: Strict AEDT-governed MLX engine: FACTORY mode (Batch Size 128) for maximum throughput, and STEALTH mode (Batch 4 x 32 Grad Accumulation) to maintain a mathematically stable effective batch size of 128 while keeping the M1 Mac's 16GB RAM free for work.
 
 ---
-
-## 🏛️ The Factory Structure (Verified)
-The environment has been modularized to support high-throughput processing resulting in a 164.8M Ultra-Pure Character library.
-
-* **1-data/**: Tiered pipeline from `01-raw` to `05-scripts` (visuddhi_v4 + refine_corpus).
-* **2-tokenizer/**: SentencePiece Unigram (8k Vocab, byte_fallback active).
-* **3-training/**: MLX-optimized engine with a Work-Aware AEDT Governor.
-* **6-logs/**: Unified dashboard for purification and training metrics.
 
 ---
 
