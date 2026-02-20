@@ -24,7 +24,6 @@ venv/
 
 # Ignore all telemetry and logs
 6-logs/
-4-output/
 *.log
 *.json
 dry_run_corpus.txt

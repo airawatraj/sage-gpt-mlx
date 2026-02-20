@@ -11,6 +11,32 @@
 
 ---
 
+## 🚦 Execution Pipeline
+
+### Step 1 & 2: Data Purification & Tokenization
+Transforms 14GB raw data into the 56.89M token pure corpus using NFKC normalization and the 8k Sutra Unigram tokenizer.
+```bash
+uv run python3 1-data/src/prepare_data_v3.py
+```
+
+### Step 3: Train with AEDT Governor
+Initiates the AEDT-governed MLX training loop. Defaults to AUTO governor, or use --mode FACTORY to force maximum throughput.
+```bash
+uv run python3 3-training/src/train_engine_mlx.py --mode FACTORY
+```
+
+### Step 4: Generalisation Gap Monitor
+Runs passively in a separate terminal to generate a dark-mode, log-scale plot of the grokking divergence (Train vs Validation Loss).
+```bash
+uv run python3 4-evaluation/generalisation_gap_monitor.py
+```
+
+### Step 5: Run the Ashtavakra Audit
+
+```bash
+uv run python3 4-evaluation/ashtavakra_audit.py
+```
+
 ---
 
 ## 🛡️ Linguistic Guardrails (V4)
@@ -36,19 +62,6 @@ SAGE-GPT adapts training intensity based on the time of day to protect M1 resour
 ### 🌙 FACTORY Mode (18:00 - 09:00)
 * **Batch Size**: 128 (Direct Metal acceleration).
 * **Focus**: High-throughput stochastic exploration.
-
----
-
-## 🚀 Execution
-
-1. **Purify 14GB Library**:
-   `uv run python3 1-data/05-scripts/visuddhi_v4.py`
-
-2. **Train with AEDT Governor**:
-   `uv run python3 3-training/src/train_engine_mlx.py`
-
-3. **Run the Ashtavakra Audit**:
-   `uv run python3 4-evaluation/ashtavakra_audit.py`
 
 ---
 > 🕉️ Om Tat Sat (ॐ तत् सत्) - The Absolute is Truth

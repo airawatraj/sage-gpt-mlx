@@ -51,8 +51,8 @@ LOWER_MEMORY_LIMIT = 8 * 1024 * 1024 * 1024
 DATA_PATH = config.TOKENIZED_DATA_DIR / "corpus.bin"
 CHECKPOINT_DIR = config.MODEL_DIR / "mlx" / "checkpoints"
 CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE = config.OUTPUT_DIR / "logs" / "training_history.csv"
-(config.OUTPUT_DIR / "logs").mkdir(parents=True, exist_ok=True)
+LOG_FILE = config.LOG_DIR / "training" / "training_history.csv"
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 TOKENIZER_MODEL = config.TOKENIZER_DIR / "sutra_tokenizer.model"
 MODE_OVERRIDE_FILE = project_root / "MODE_OVERRIDE.txt"
 
