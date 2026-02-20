@@ -8,7 +8,7 @@ from pathlib import Path
 
 # --- Configuration & Paths ---
 current_dir = Path(__file__).resolve().parent
-project_root = current_dir.parent.parent
+project_root = current_dir.parent
 sys.path.append(str(project_root))
 
 try:
@@ -23,10 +23,10 @@ INTERRUPT_SAVE = CHECKPOINT_DIR / "interrupt_save.safetensors"
 
 # Architecture Alignment
 VOCAB_SIZE = 8000
-N_LAYER = 6
-N_HEAD = 6
-N_EMBD = 384
-CONTEXT_LENGTH = 512
+N_LAYER = 4
+N_HEAD = 8
+N_EMBD = 256
+CONTEXT_LENGTH = 256
 DROPOUT = 0.1
 
 # --- Model Architecture (EXACT REPLICA of train_engine_mlx.py) ---

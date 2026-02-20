@@ -2,6 +2,7 @@
 from pathlib import Path
 
 PROJECT_ROOT = Path("/Users/rajrawat/rawatlabs/sage-gpt")
+ROOT_DIR = PROJECT_ROOT
 
 RAW_DATA_DIR = PROJECT_ROOT / "1-data/01-raw"
 PURIFIED_DATA_DIR = PROJECT_ROOT / "1-data/02-purified"
@@ -11,8 +12,18 @@ TOKENIZER_DIR = PROJECT_ROOT / "2-tokenizer"
 MODEL_DIR = PROJECT_ROOT / "3-model"
 TRAINING_SRC_DIR = PROJECT_ROOT / "3-training/src"
 OUTPUT_DIR = PROJECT_ROOT / "4-output"
+LOG_DIR = PROJECT_ROOT / "6-logs"
 VENV_DIR = PROJECT_ROOT / "sage-gpt"
 
 # Ensure directories exist
 for directory in [RAW_DATA_DIR, PURIFIED_DATA_DIR, TOKENIZED_DATA_DIR, META_DATA_DIR, TOKENIZER_DIR, MODEL_DIR, TRAINING_SRC_DIR, OUTPUT_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
+
+# 8.4M Grokking Specs
+MODEL_NAME = "Sage-GPT-8.4M-Grok"
+DATA_STATS = "164.8M Ultra-Pure Characters"
+VOCAB_SIZE = 8000
+CONTEXT_LENGTH = 256
+EMBED_DIM = 256
+HEADS = 8
+LAYERS = 4

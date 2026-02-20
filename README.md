@@ -1,94 +1,57 @@
-# 🕉️ Sovereign Ancient General Intelligence (SAGE)
+# 🕉️ Sovereign Ancient General Intelligence (SAGE-GPT)
 
 > "To find the Sutra in the Signal."
 
-**SAGE** is an initiative to distill the structural logic of the Sanskrit language into a pure, parameter-constrained neural architecture. By deliberately limiting capacity, we force the model to move past rote memorization and toward *grokking*—the phase transition where a model internalizes grammatical and semantic rules.
+**SAGE-GPT** is an **8.4M parameter** LLM intentionally constrained to act as a linguistic distillation engine for Sanskrit. By deliberately limiting capacity to **4 layers and 8 heads**, we force the model toward **grokking**—the phase transition where a neural network internalizes Paninian grammatical logic rather than merely memorizing patterns.
 
 ---
 
-## The Grokking Regime
+## 🏛️ The Factory Structure (Verified)
+The environment has been modularized to support high-throughput processing resulting in a 164.8M Ultra-Pure Character library.
 
-We are operating under a high-pressure regime designed to induce delayed generalization through extreme overfitting on a high-quality Sanskrit corpus.
-
-### The "Pressure Cooker" Architecture (Verified)
-Built for the 16GB M1 Pro, SAGE uses a narrow but deep configuration to maximize the density of representation.
-
-| Hyperparameter | Value | Description |
-| :--- | :--- | :--- |
-| **Parameters** | **16.78M** | Optimized for "Nano-Grade" intelligence. |
-| **Dimensions ($D$)** | **384** | Narrow semantic channel. |
-| **Layers ($L$)** | **6** | Transformer blocks for hierarchy. |
-| **Heads ($H$)** | **6** | Multi-head attention (64 dim/head). |
-| **Context ($C$)** | **512** | Local dependency horizon. |
-| **Vocabulary** | **8,000** | SentencePiece Unigram (NFKC Normalized). |
-
-### The Truth Test
-* **Total Corpus**: ~80.93M Tokens (Vedic, Classical, & Shastra).
-* **Tokenization**: NFKC normalization ensures Sanskrit roots are preserved.
-* **Split**: 90% Train / 10% Val (used to monitor the **Grokking Gap**).
+* **1-data/**: Tiered pipeline from `01-raw` to `05-scripts` (visuddhi_v4 + refine_corpus).
+* **2-tokenizer/**: SentencePiece Unigram (8k Vocab, byte_fallback active).
+* **3-training/**: MLX-optimized engine with a Work-Aware AEDT Governor.
+* **6-logs/**: Unified dashboard for purification and training metrics.
 
 ---
 
-## 🐚 The 8 Bends (Ashtavakra Audit)
-To measure grokking, we use a specialized hybrid diagnostic that tests the model against the "8 Bends" of Sanskrit linguistic logic.
+## 🛡️ Linguistic Guardrails (V4)
+Our "Zero-Poison" policy ensures the model trains only on high-fidelity Sanskrit.
 
-| Bend | Test | Goal |
+| Feature | Implementation | Goal |
 | :--- | :--- | :--- |
-| **1** | Phonetic Stability | Checks for stuttering in "ॐ" flow. |
-| **2** | Invocation | Completion of "असतो मा" > "सद्गमय". |
-| **3** | Case Inflection | Validates Visarga probability ($P(ः) > 0.4$) for "राम". |
-| **4** | Name Synthesis | Tests Guna Sandhi (नर + इन्द्र = नरेन्द्र). |
-| **5** | Concept Flow | Mundaka Upanishad flow (यथा नद्यः > समुद्रे). |
-| **6** | Verse Sequence | Checks Isha Upanishad continuity. |
-| **7** | Orthography | Validates retroflexion clusters (कृष् > ण). |
-| **8** | The Atman Test | Mahavakya completion (तत्त्वमसि > श्वेतकेतो). |
-
-### Run the Audit
-```bash
-uv run python3 3-training/src/ashtavakra_audit.py
-```
+| **Normalization** | **NFKC** | Prevents shattering of conjuncts/roots (No NFC). |
+| **Noise Shield** | Disjoint Stopwords | 100% rejection of Hindi, Marathi, Pali, and Prakrit. |
+| **Punctuation** | Danda-Aware | Protects sutras even with trailing '।' or '॥' markers. |
+| **Vedic Safety** | Swara Protection | Preservation of Visarga (ः), Anusvara (ं), and Vedic accents. |
 
 ---
 
 ## ⚙️ Operational Modes (AEDT Aware)
-
-SAGE utilizes a **Work-Aware Governor** that adapts training intensity based on the time of day.
+SAGE-GPT adapts training intensity based on the time of day to protect M1 resources.
 
 ### ☀️ STEALTH Mode (09:00 - 18:00)
-* **Batch Size**: 4 (Micro) with 32-step Gradient Accumulation.
+* **Batch Size**: 4 (with 32-step Grad Accumulation).
 * **Effective BS**: 128 (Mathematically stable).
-* **VRAM**: ~0.4GB. Designed for silent background meditation while you work.
+* **VRAM**: Optimized for background execution while working.
 
 ### 🌙 FACTORY Mode (18:00 - 09:00)
-* **Batch Size**: 128 (Direct).
-* **Throughput**: Maximum Metal acceleration.
-* **Focus**: Stochastic exploration of the loss landscape.
+* **Batch Size**: 128 (Direct Metal acceleration).
+* **Focus**: High-throughput stochastic exploration.
 
 ---
 
-## 🚀 Execution & Interaction
+## 🚀 Execution
 
-### 1. Environment Setup
-```bash
-uv pip install -r requirements.txt
-```
+1. **Purify 14GB Library**:
+   `uv run python3 1-data/05-scripts/visuddhi_v4.py`
 
-### 2. The Training Loop
-```bash
-uv run python3 3-training/src/train_engine_mlx.py
-```
+2. **Train with AEDT Governor**:
+   `uv run python3 3-training/src/train_engine_mlx.py`
 
-### 3. Dual-Mode Inference
-```bash
-uv run python3 3-training/src/inference_engine_mlx_v2.py
-```
-
----
-
-## 📊 Monitoring
-```bash
-uv run python3 4-output/scripts/plot_grokking.py
-```
+3. **Run the Ashtavakra Audit**:
+   `uv run python3 4-evaluation/ashtavakra_audit.py`
 
 ---
 > 🕉️ Om Tat Sat (ॐ तत् सत्) - The Absolute is Truth

@@ -26,10 +26,10 @@ except ImportError:
 
 # --- Configuration ---
 VOCAB_SIZE = 8000
-N_LAYER = 6
-N_HEAD = 6
-N_EMBD = 384
-CONTEXT_LENGTH = 512
+N_LAYER = 4
+N_HEAD = 8
+N_EMBD = 256
+CONTEXT_LENGTH = 256
 DROPOUT = 0.1
 
 # Training
@@ -252,6 +252,11 @@ def main():
     
     sp = spm.SentencePieceProcessor(model_file=str(TOKENIZER_MODEL))
     
+    # Vocabulary Alignment & Tokenizer Safety Check
+    assert sp.vocab_size() == VOCAB_SIZE, f"Shape Mismatch! Expected {VOCAB_SIZE}, got {sp.vocab_size()}"
+    byte_fallback_active = sp.piece_to_id('<0x00>') != sp.unk_id() if hasattr(sp, 'piece_to_id') else "Unknown"
+    print(f"[TOKENIZER] byte_fallback active: {byte_fallback_active}")
+    
     model = TransformerLM(VOCAB_SIZE, N_LAYER, N_EMBD, N_HEAD)
     mx.eval(model.parameters())
     params = sum(v.size for _, v in tree_flatten(model.parameters()))
@@ -381,7 +386,7 @@ def main():
                 
                 # Eager evaluation in STEALTH to prevent graph build-up
                 if mode == "STEALTH":
-                    mx.eval(loss, grads)
+                    mx.eval(loss, accumulated_grads)
 
             # Apply the fully accumulated gradients (Mathematically identical to 1x 128 Batch)
             optimizer.update(model, accumulated_grads)
