@@ -63,5 +63,12 @@ SAGE-GPT adapts training intensity based on the time of day to protect M1 resour
 * **Batch Size**: 128 (Direct Metal acceleration).
 * **Focus**: High-throughput stochastic exploration.
 
+
+### Prune Checkpoints
+
+```bash
+uv run python3 3-training/src/prune_checkpoints.py
+``` 
+
 ---
 > 🕉️ Om Tat Sat (ॐ तत् सत्) - The Absolute is Truth
