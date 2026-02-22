@@ -155,17 +155,17 @@ def get_lr(it):
     return LEARNING_RATE_MIN + coeff * (LEARNING_RATE_MAX - LEARNING_RATE_MIN)
 
 def get_governor_state(current_batch_size, override_status=None):
-    if override_status == "FACTORY":
-        return FACTORY_BATCH_SIZE, 0.0, "FACTORY (OVERRIDE)"
-    elif override_status == "STEALTH":
-        return STEALTH_BATCH_SIZE, STEALTH_SLEEP, "STEALTH (OVERRIDE)"
-
     active_mem = mx.get_active_memory()
     if active_mem > MEMORY_LIMIT_BYTES:
         print(f"[SAFETY] Memory {active_mem/1024**3:.2f}GB > Limit. Dropping Batch Size.")
         new_bs = max(1, current_batch_size // 2)
         mx.clear_cache()
         return new_bs, 0.1, "SAFETY_RECOVERY"
+
+    if override_status == "FACTORY":
+        return FACTORY_BATCH_SIZE, 0.0, "FACTORY (OVERRIDE)"
+    elif override_status == "STEALTH":
+        return STEALTH_BATCH_SIZE, STEALTH_SLEEP, "STEALTH (OVERRIDE)"
 
     now = datetime.now(AEDT_OFFSET)
     hour = now.hour
@@ -385,7 +385,7 @@ def main():
                     time.sleep(sleep_time)
                 
                 # Eager evaluation in STEALTH to prevent graph build-up
-                if mode == "STEALTH":
+                if accum_steps > 1:
                     mx.eval(loss, accumulated_grads)
 
             # Apply the fully accumulated gradients (Mathematically identical to 1x 128 Batch)
