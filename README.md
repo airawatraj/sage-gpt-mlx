@@ -26,12 +26,24 @@ uv run python3 3-training/src/train_engine_mlx.py --mode FACTORY
 ```
 
 ### Step 4: Generalisation Gap Monitor
-Runs passively in a separate terminal to generate a dark-mode, log-scale plot of the grokking divergence (Train vs Validation Loss).
+Runs passively in a separate terminal to generate a dark-mode, log-scale plot of the grokking divergence (Train vs Validation Loss). The plot is saved to `6-logs/evaluation/generalisation_gap.png`.
 ```bash
 uv run python3 4-evaluation/generalisation_gap_monitor.py
 ```
 
-### Step 5: Run the Ashtavakra Audit
+### Step 5: Mechanistic Weight Norm Inspection
+Calculates L2 norms for the Attention and MLP layer weight matrices from the `interrupt_save.safetensors` checkpoint. Logs these metrics to `6-logs/evaluation/norm_tracking.csv`.
+```bash
+uv run python3 4-evaluation/inspect_norms.py
+```
+
+### Step 6: Visualize Weight Norm Trajectories
+Reads the tracked norms and renders a dark-mode plot of the 'Average Attention L2 Norm', 'Average MLP L2 Norm', and 'Block 0 QKV Peak Norm'. The plot is saved to `6-logs/evaluation/norm_history.png`.
+```bash
+uv run python3 4-evaluation/plot_norms.py
+```
+
+### Step 7: Run the Ashtavakra Audit
 
 ```bash
 uv run python3 4-evaluation/ashtavakra_audit.py

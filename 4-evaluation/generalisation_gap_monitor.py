@@ -15,7 +15,7 @@ except ImportError:
     sys.exit(1)
 
 LOG_FILE = config.LOG_DIR / "training" / "training_history.csv"
-OUTPUT_PLOT = current_dir / "generalisation_gap.png"
+OUTPUT_PLOT = config.LOG_DIR / "evaluation" / "generalisation_gap.png"
 
 # Hyperparameters
 WARMUP_STEPS = 2000
@@ -63,6 +63,7 @@ def plot_curves():
     ax.grid(True, which="both", linestyle='-', alpha=0.15)
     ax.legend(loc='upper right', framealpha=0.3)
     
+    OUTPUT_PLOT.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
     plt.savefig(OUTPUT_PLOT, dpi=300, facecolor=fig.get_facecolor())
     print(f"[SAGE-ARCH] Gap monitor rendered to: {OUTPUT_PLOT}")
