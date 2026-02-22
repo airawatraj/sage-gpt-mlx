@@ -82,6 +82,7 @@ def plot_curves():
     ax2.plot(train_df['Step'], train_df['Train_Loss_Var'], label='Training Loss Turbulence (50-Step Rolling Variance)', color='#FF6347', linewidth=1.5, alpha=0.9)
     ax2.set_xlabel('Steps', fontsize=12)
     ax2.set_ylabel('Variance', fontsize=12)
+    ax2.set_yscale('log')
     ax2.grid(True, which="both", linestyle='-', alpha=0.15)
     ax2.legend(loc='upper right', framealpha=0.3)
     
