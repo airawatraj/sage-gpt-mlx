@@ -49,6 +49,13 @@ uv run python3 4-evaluation/plot_norms.py
 uv run python3 4-evaluation/ashtavakra_audit.py
 ```
 
+# Tip : Run all evaluation scripts together
+
+```bash
+./4-evaluation/evaluate.sh
+```
+
+
 ---
 
 ## 🛡️ Linguistic Guardrails (V4)
