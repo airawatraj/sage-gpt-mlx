@@ -43,6 +43,17 @@ def plot_curves():
 
     latest_tr = train_df['Train_Loss'].iloc[-1]
     latest_val = val_df['Val_Loss'].iloc[-1]
+    
+    # Calculate grokking detection trigger
+    # Only if we have at least 6 validation points
+    if len(val_df) >= 6:
+        recent_val_avg = val_df['Val_Loss'].iloc[-6:-1].mean()
+        drop_pct = (recent_val_avg - latest_val) / recent_val_avg
+        
+        if drop_pct > 0.05:
+            # \a chimes the terminal bell, \033[1;31m sets bold red text
+            print(f"\a\033[1;31m[SAGE-GROK-DETECTED] ALARM: Validation loss dropped by {drop_pct*100:.2f}%! Phase transition initiated.\033[0m")
+            print(f"\033[1;31mRecent Avg: {recent_val_avg:.4f} -> Latest Val: {latest_val:.4f}\033[0m")
 
     plt.style.use('dark_background')
     fig, ax = plt.subplots(figsize=(14, 7))
