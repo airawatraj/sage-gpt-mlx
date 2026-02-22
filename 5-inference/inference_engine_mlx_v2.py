@@ -93,8 +93,9 @@ class TransformerLM(nn.Module):
 
     def __call__(self, x):
         L = x.shape[1]
-        mask = nn.MultiHeadAttention.create_additive_causal_mask(L).astype(x.dtype)
-        x = self.embedding(x)
+        x_emb = self.embedding(x)
+        mask = nn.MultiHeadAttention.create_additive_causal_mask(L).astype(x_emb.dtype)
+        x = x_emb
         for block in self.blocks:
             x = block(x, mask)
         x = self.ln_f(x)
