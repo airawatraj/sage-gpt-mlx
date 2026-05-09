@@ -1,4 +1,4 @@
-# 🕉️ Sovereign Ancient General Intelligence (SAGE-GPT)
+# 🕉️ SageGPT — Sanskrit SLM (MLX)
 
 > "To find the Sutra in the Signal."
 
@@ -59,7 +59,7 @@ uv run python3 4-evaluation/ashtavakra_audit.py
 ---
 
 ## 🛡️ Linguistic Guardrails (V4)
-Our "Zero-Poison" policy ensures the model trains only on high-fidelity Sanskrit.
+The "Zero-Poison" policy ensures the model trains only on high-fidelity Sanskrit.
 
 | Feature | Implementation | Goal |
 | :--- | :--- | :--- |
